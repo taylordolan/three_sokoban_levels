@@ -13,8 +13,177 @@ __lua__
 rows = 8
 cols = 8
 
+function blueprint_from_sprite(level_sprite)
+  -- draw the sprite at 1,1 instead of 0,0 so looping through
+  -- rows and columns can also start at 1, as is the lua way
+  spr(level_sprite, 1, 1)
+  local blueprint = {}
+  -- 2d array for the level
+  for x = 1, cols do
+		blueprint[x] = {}
+		for y = 1, rows do
+			blueprint[x][y] = pget(x, y)
+		end
+	end
+  return blueprint
+end
+
+-- global stuff
+blueprint = blueprint_from_sprite(008)
+history = {}
+goals = {}
+
+-- edit mode stuff
+edit_mode = false
+cursor = {
+  x = 1,
+  y = 1,
+  just_placed = false,
+  piece_colors = {002, 005, 007, 014, 015},
+  index = 1,
+  attempt_move = function(self, dir)
+    local dest = {self.x + dir[1], self.y + dir[2]}
+    if tile_exists(dest) then
+      self.x = dest[1]
+      self.y = dest[2]
+      self.just_placed = false
+    end
+  end,
+  draw = function(self)
+    rect(screen_x(self.x) - 2, screen_y(self.y) - 2, screen_x(self.x) + 8, screen_y(self.y) + 8, self.piece_colors[self.index])
+    rect(screen_x(self.x) - 3, screen_y(self.y) - 3, screen_x(self.x) + 9, screen_y(self.y) + 9, 000)
+  end,
+}
+
+function _init()
+
+  -- build the current level
+  build_board(blueprint)
+end
+
+function _update60()
+
+  if btnp(5) then
+    edit_mode = not edit_mode
+    history = {}
+    build_board(blueprint)
+  end
+
+  -- edit mode
+  if edit_mode then
+    if btnp(4) then
+      if cursor.just_placed then
+        cursor.index += 1
+        if (cursor.index > #cursor.piece_colors) cursor.index = 1
+      end
+      blueprint[cursor.x][cursor.y] = cursor.piece_colors[cursor.index]
+      cursor.just_placed = true
+    else
+      for i = 1, 4 do
+        -- using `i - 1` because arrow key values are 0,1,2,3
+        if btnp(i - 1) then
+          -- this maps directions to button input values
+          local dirs = {{-1,0},{1,0},{0,-1},{0,1}}
+          cursor:attempt_move(dirs[i])
+        end
+      end
+    end
+
+  -- play mode
+  else
+    -- undo
+    if btnp(4) and #history > 0 then
+      undo()
+    else
+      for i = 1, 4 do
+        -- using `i - 1` because arrow key values are 0,1,2,3
+        if btnp(i - 1) then
+          update_history()
+          -- this maps directions to button input values
+          local dirs = {{-1,0},{1,0},{0,-1},{0,1}}
+          -- move all heroes
+          for next in all(heroes) do
+            next:attempt_move(dirs[i], dirs[i])
+          end
+          for next in all(heroes) do
+            next.moved_by_other = false
+          end
+        end
+      end
+    end
+  end
+end
+
+function _draw()
+  -- clear the screen
+  cls()
+  -- draw the floor
+  for x = 1, cols do
+		for y = 1, rows do
+			spr(002, screen_x(x), screen_y(y))
+		end
+	end
+  if edit_mode then
+    for x = 1, cols do
+      for y = 1, rows do
+        local foo = {
+          [005] = 004,
+          [015] = 003,
+          [002] = 001,
+          [014] = 005,
+        }
+        local color = blueprint[x][y]
+        spr(foo[color], screen_x(x), screen_y(y))
+      end
+    cursor:draw()
+    local message = "edit mode"
+    print(message, 64 - #message * 2, 13, 007)
+	end
+  else
+    -- draw things
+    for next in all(pieces) do
+      next:draw()
+    end
+    for next in all(goals) do
+      next:draw()
+    end
+  end
+end
+
+-- using `piece` as a thing that goes on the board
+function new_piece()
+  local piece = {
+    set_tile = function(self, x, y)
+      -- remove it from its current tile, if it's in one
+      if self.x and self.y then
+        del(board[self.x][self.y], self)
+      end
+      -- set its x and y values
+      self.x = x
+      self.y = y
+      -- put it in its new tile
+      add(board[self.x][self.y], self)
+    end,
+    move = function(self, dir)
+      local dest = {self.x + dir[1], self.y + dir[2]}
+      -- if the tile exists and nothing is in the destination tile
+      if tile_exists(dest) and tile_content(dest) == nil then
+        self:set_tile(self.x + dir[1], self.y + dir[2])
+      end
+    end,
+    draw = function(self)
+      spr(self.sprite, screen_x(self.x), screen_y(self.y))
+    end,
+  }
+  add(pieces, piece)
+  return piece
+end
+
 function new_hero()
-  local hero = new_piece(001, false)
+  local hero = new_piece()
+  hero.sprite = 001
+  hero.color = 002
+  hero.fixed = false
 
   hero.attempt_move = function(self, dir)
 
@@ -57,6 +226,7 @@ end
 
 function new_goal()
   local goal = {
+    color = 014,
     sprite = 005,
     x = x,
     y = y,
@@ -77,45 +247,37 @@ end
 
 -- creates a wall
 function new_wall()
-  return new_piece(004, true)
+  local wall = new_piece()
+  wall.sprite = 004
+  wall.color = 005
+  wall.fixed = true
+  return wall
 end
 
 -- creates a block
 function new_block()
-  return new_piece(003, false)
+  local block = new_piece()
+  block.sprite = 003
+  block.color = 015
+  block.fixed = false
+  return block
 end
 
-function blueprint_from_sprite(level_sprite)
-
-  -- maps colors in the level sprite to objects to generate
-  color_mappings = {
-    [005] = new_wall,
-    [015] = new_block,
-    [002] = new_hero,
-    [014] = new_goal,
-  }
-
-  -- draw the sprite at 1,1 instead of 0,0 so looping through
-  -- rows and columns can also start at 1, as is the lua way
-  spr(level_sprite, 1, 1)
-  local level_table = {}
-
+function blueprint_from_board()
+  local blueprint = {}
   for x = 1, cols do
-		level_table[x] = {}
+		blueprint[x] = {}
 		for y = 1, rows do
-      -- 2d array for the level
-			level_table[x][y] = color_mappings[pget(x, y)]
+      local piece = board[x][y][1]
+      if piece then
+        blueprint[x][y] = piece.color
+      end
 		end
 	end
-  return level_table
+  return blueprint
 end
 
-blueprint = blueprint_from_sprite(008)
-
-move_log = {}
-goals = {}
-
-function _init()
+function build_board(blueprint)
 
   -- global stuff for play mode
   board = {}
@@ -123,158 +285,12 @@ function _init()
   heroes = {}
   level_complete = false
 
-  -- global stuff for edit mode
-  edit_mode = false
-  cursor = {
-    x = 1,
-    y = 1,
-    just_placed = false,
-    piece_colors = {002, 005, 007, 014, 015},
-    index = 1,
-    attempt_move = function(self, dir)
-      local dest = {self.x + dir[1], self.y + dir[2]}
-      if tile_exists(dest) then
-        self.x = dest[1]
-        self.y = dest[2]
-        self.just_placed = false
-      end
-    end,
-    draw = function(self)
-      rect(screen_x(self.x) - 2, screen_y(self.y) - 2, screen_x(self.x) + 8, screen_y(self.y) + 8, self.piece_colors[self.index])
-      rect(screen_x(self.x) - 3, screen_y(self.y) - 3, screen_x(self.x) + 9, screen_y(self.y) + 9, 000)
-    end,
+  color_mappings = {
+    [005] = new_wall,
+    [015] = new_block,
+    [002] = new_hero,
+    [014] = new_goal,
   }
-
-  -- build the current level
-  build_board(blueprint)
-end
-
-function _update60()
-
-  if btnp(5) then
-    edit_mode = not edit_mode
-    build_board(blueprint)
-  end
-
-  -- edit mode
-  if edit_mode then
-    if btnp(4) then
-      if cursor.just_placed then
-        cursor.index += 1
-        if (cursor.index > #cursor.piece_colors) cursor.index = 1
-      end
-      blueprint[cursor.x][cursor.y] = cursor.piece_colors[cursor.index]
-      cursor.just_placed = true
-    else
-      for i = 1, 4 do
-        -- using `i - 1` because arrow key values are 0,1,2,3
-        if btnp(i - 1) then
-          -- this maps directions to button input values
-          local dirs = {{-1,0},{1,0},{0,-1},{0,1}}
-          cursor:attempt_move(dirs[i])
-        end
-      end
-    end
-
-  -- play mode
-  else
-    -- undo
-    if btnp(4) then
-      undo()
-    else
-      for i = 1, 4 do
-        -- using `i - 1` because arrow key values are 0,1,2,3
-        if btnp(i - 1) then
-          update_history()
-          -- this maps directions to button input values
-          local dirs = {{-1,0},{1,0},{0,-1},{0,1}}
-          -- move all heroes
-          for next in all(heroes) do
-            next:attempt_move(dirs[i], dirs[i])
-          end
-          for next in all(heroes) do
-            next.moved_by_other = false
-          end
-        end
-      end
-    end
-  end
-end
-
-function update_history()
-
-  sprite_mappings = {
-    [004] = new_wall,
-    [003] = new_block,
-    [001] = new_hero,
-    [005] = new_goal,
-  }
-
-  local board_copy = {}
-  for x = 1, cols do
-		board_copy[x] = {}
-		for y = 1, rows do
-      local thing = board[x][y][1]
-      if thing then
-        board_copy[x][y] = sprite_mappings[thing.sprite]
-      end
-		end
-	end
-  -- for next in all(goals) do
-  --   board_copy[next.x][next.y] = new_goal
-  -- end
-  add(move_log, board_copy)
-end
-
-function undo()
-  blueprint = move_log[#move_log]
-  del(move_log, move_log[#move_log])
-  _init()
-end
-
-function _draw()
-  -- clear the screen
-  cls()
-  -- draw the floor
-  for x = 1, cols do
-		for y = 1, rows do
-			spr(002, screen_x(x), screen_y(y))
-		end
-	end
-  if edit_mode then
-    for x = 1, cols do
-      for y = 1, rows do
-        local foo = {
-          [005] = 004,
-          [015] = 003,
-          [002] = 001,
-          [014] = 005,
-        }
-        local color = blueprint[x][y]
-        spr(foo[color], screen_x(x), screen_y(y))
-      end
-    cursor:draw()
-    local message = "edit mode"
-    print(message, 64 - #message * 2, 13, 007)
-	end
-  else
-    -- draw things
-    for next in all(pieces) do
-      next:draw()
-    end
-    for next in all(goals) do
-      next:draw()
-    end
-  end
-end
-
-function build_board(level_table)
-
-  -- todo maybe kill this stuff
-  board = {}
-  pieces = {}
-  heroes = {}
-  level_complete = false
 
   -- add stuff to the board
 	for x = 1, cols do
@@ -284,13 +300,24 @@ function build_board(level_table)
 			board[x][y] = {}
       -- get the function in color_mappings that matches the
       -- current color in the level sprite
-      local next = level_table[x][y]
+      local next = color_mappings[blueprint[x][y]]
       -- set tiles for stuff from the level sprite
       if next then
         next():set_tile(x, y)
       end
 		end
 	end
+end
+
+function update_history()
+  local board_copy = blueprint_from_board()
+  add(history, board_copy)
+end
+
+function undo()
+  local previous = history[#history]
+  del(history, previous)
+  build_board(previous)
 end
 
 -- checks to see if all goals are occupied by heroes
@@ -303,37 +330,6 @@ function is_level_complete()
     end
   end
   return complete
-end
-
--- using `piece` as a thing that goes on the board
-function new_piece(sprite, fixed) -- fixed = can't be pushed
-  local piece = {
-    sprite = sprite,
-    fixed = fixed,
-    set_tile = function(self, x, y)
-      -- remove it from its current tile, if it's in one
-      if self.x and self.y then
-        del(board[self.x][self.y], self)
-      end
-      -- set its x and y values
-      self.x = x
-      self.y = y
-      -- put it in its new tile
-      add(board[self.x][self.y], self)
-    end,
-    move = function(self, dir)
-      local dest = {self.x + dir[1], self.y + dir[2]}
-      -- if the tile exists and nothing is in the destination tile
-      if tile_exists(dest) and tile_content(dest) == nil then
-        self:set_tile(self.x + dir[1], self.y + dir[2])
-      end
-    end,
-    draw = function(self)
-      spr(self.sprite, screen_x(self.x), screen_y(self.y))
-    end,
-  }
-  add(pieces, piece)
-  return piece
 end
 
 -- check if a tile actually exists on the board
@@ -357,18 +353,6 @@ end
 function screen_y(y)
   local offset = 64 - rows * 4
   return (y - 1) * 8 + offset
-end
-
--- delete by index, keeps order
--- thanks @ultrabrite
-function idel(t, i)
-  local n = #t
-  if (i > 0 and i <= n) then
-    for j = i, n - 1 do
-      t[j] = t[j + 1]
-    end
-    t[n] = nil
-  end
 end
 
 __gfx__
