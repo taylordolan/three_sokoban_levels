@@ -7,17 +7,119 @@ __lua__
 -- todo
 -- [ ] do some sort of mapping of types to sprites?
 -- [ ] allow multiple adjacent heroes to move in the expected way
+-- [ ] undo feature
+
+-- board size
+rows = 8
+cols = 8
+
+function new_hero()
+  local hero = new_piece(001, false)
+
+  hero.attempt_move = function(self, dir)
+
+    if self.moved_by_other then
+      return
+    end
+    local next = {self.x, self.y}
+
+    -- make a list of everything that can be moved
+    local things_to_move = {}
+    while true do
+      if tile_exists(next) and tile_content(next) != nil then
+        local thing = tile_content(next)
+        -- if there's a wall, then nothing moves
+        if thing.fixed then
+          things_to_move = {}
+          break
+        else
+          add(things_to_move, thing)
+          if thing.sprite == 001 then
+            thing.moved_by_other = true
+          end
+        end
+        next = {next[1] + dir[1], next[2] + dir[2]}
+      else
+        break
+      end
+    end
+
+    -- attempt to move things, starting with the one that was
+    -- furthest from the hero
+    for j = #things_to_move, 1, -1 do
+      things_to_move[j]:move(dir)
+    end
+  end
+
+  add(heroes, hero)
+  return hero
+end
+
+function new_goal()
+  local goal = {
+    sprite = 005,
+    x = x,
+    y = y,
+  -- goal has a special set_tile because it doesn't get added to
+  -- `board`. we need the goal's tile to technically be empty so
+  -- the hero can step into it
+    set_tile = function(self, x, y)
+      self.x = x
+      self.y = y
+    end,
+    draw = function(self)
+      spr(self.sprite, screen_x(self.x), screen_y(self.y))
+    end,
+  }
+  add(goals, goal)
+  return goal
+end
+
+-- creates a wall
+function new_wall()
+  return new_piece(004, true)
+end
+
+-- creates a block
+function new_block()
+  return new_piece(003, false)
+end
+
+function blueprint_from_sprite(level_sprite)
+
+  -- maps colors in the level sprite to objects to generate
+  color_mappings = {
+    [005] = new_wall,
+    [015] = new_block,
+    [002] = new_hero,
+    [014] = new_goal,
+  }
+
+  -- draw the sprite at 1,1 instead of 0,0 so looping through
+  -- rows and columns can also start at 1, as is the lua way
+  spr(level_sprite, 1, 1)
+  local level_table = {}
+
+  for x = 1, cols do
+		level_table[x] = {}
+		for y = 1, rows do
+      -- 2d array for the level
+			level_table[x][y] = color_mappings[pget(x, y)]
+		end
+	end
+  return level_table
+end
+
+blueprint = blueprint_from_sprite(008)
+
+move_log = {}
+goals = {}
 
 function _init()
-
-	-- board size
-	rows = 8
-	cols = 8
 
   -- global stuff for play mode
   board = {}
   pieces = {}
-  goals = {}
   heroes = {}
   level_complete = false
 
@@ -43,7 +145,6 @@ function _init()
     end,
   }
 
-  blueprint = make_blueprint(008)
   -- build the current level
   build_board(blueprint)
 end
@@ -77,21 +178,58 @@ function _update60()
 
   -- play mode
   else
-    for i = 1, 4 do
-      -- using `i - 1` because arrow key values are 0,1,2,3
-      if btnp(i - 1) then
-        -- this maps directions to button input values
-        local dirs = {{-1,0},{1,0},{0,-1},{0,1}}
-        -- move all heroes
-        for next in all(heroes) do
-          next:attempt_move(dirs[i], dirs[i])
-        end
-        for next in all(heroes) do
-          next.moved_by_other = false
+    -- undo
+    if btnp(4) then
+      undo()
+    else
+      for i = 1, 4 do
+        -- using `i - 1` because arrow key values are 0,1,2,3
+        if btnp(i - 1) then
+          update_history()
+          -- this maps directions to button input values
+          local dirs = {{-1,0},{1,0},{0,-1},{0,1}}
+          -- move all heroes
+          for next in all(heroes) do
+            next:attempt_move(dirs[i], dirs[i])
+          end
+          for next in all(heroes) do
+            next.moved_by_other = false
+          end
         end
       end
     end
   end
+end
+
+function update_history()
+
+  sprite_mappings = {
+    [004] = new_wall,
+    [003] = new_block,
+    [001] = new_hero,
+    [005] = new_goal,
+  }
+
+  local board_copy = {}
+  for x = 1, cols do
+		board_copy[x] = {}
+		for y = 1, rows do
+      local thing = board[x][y][1]
+      if thing then
+        board_copy[x][y] = sprite_mappings[thing.sprite]
+      end
+		end
+	end
+  -- for next in all(goals) do
+  --   board_copy[next.x][next.y] = new_goal
+  -- end
+  add(move_log, board_copy)
+end
+
+function undo()
+  blueprint = move_log[#move_log]
+  del(move_log, move_log[#move_log])
+  _init()
 end
 
 function _draw()
@@ -130,37 +268,11 @@ function _draw()
   end
 end
 
-function make_blueprint(level_sprite)
-
-  -- draw the sprite at 1,1 instead of 0,0 so looping through
-  -- rows and columns can also start at 1, as is the lua way
-  spr(level_sprite, 1, 1)
-  local level_table = {}
-
-  for x = 1, cols do
-		level_table[x] = {}
-		for y = 1, rows do
-      -- 2d array for the level
-			level_table[x][y] = pget(x, y)
-		end
-	end
-  return level_table
-end
-
 function build_board(level_table)
-
-  -- maps colors in the level sprite to objects to generate
-  color_mappings = {
-    [005] = new_wall,
-    [015] = new_block,
-    [002] = new_hero,
-    [014] = new_goal,
-  }
 
   -- todo maybe kill this stuff
   board = {}
   pieces = {}
-  goals = {}
   heroes = {}
   level_complete = false
 
@@ -172,7 +284,7 @@ function build_board(level_table)
 			board[x][y] = {}
       -- get the function in color_mappings that matches the
       -- current color in the level sprite
-      local next = color_mappings[level_table[x][y]]
+      local next = level_table[x][y]
       -- set tiles for stuff from the level sprite
       if next then
         next():set_tile(x, y)
@@ -222,77 +334,6 @@ function new_piece(sprite, fixed) -- fixed = can't be pushed
   }
   add(pieces, piece)
   return piece
-end
-
-function new_hero()
-  local hero = new_piece(001, false)
-
-  hero.attempt_move = function(self, dir)
-
-    if self.moved_by_other then
-      return
-    end
-    local next = {self.x, self.y}
-
-    -- make a list of everything that can be moved
-    local things_to_move = {}
-    while true do
-      if tile_exists(next) and tile_content(next) != nil then
-        local thing = tile_content(next)
-        -- if there's a wall, then nothing moves
-        if thing.fixed then
-          things_to_move = {}
-          break
-        else
-          add(things_to_move, thing)
-          if thing.sprite == 001 then
-          end
-        end
-        next = {next[1] + dir[1], next[2] + dir[2]}
-      else
-        break
-      end
-    end
-
-    -- attempt to move things, starting with the one that was
-    -- furthest from the hero
-    for j = #things_to_move, 1, -1 do
-      things_to_move[j]:move(dir)
-    end
-  end
-
-  add(heroes, hero)
-  return hero
-end
-
-function new_goal()
-  local goal = {
-    sprite = 005,
-    x = x,
-    y = y,
-  -- goal has a special set_tile because it doesn't get added to
-  -- `board`. we need the goal's tile to technically be empty so
-  -- the hero can step into it
-    set_tile = function(self, x, y)
-      self.x = x
-      self.y = y
-    end,
-    draw = function(self)
-      spr(self.sprite, screen_x(self.x), screen_y(self.y))
-    end,
-  }
-  add(goals, goal)
-  return goal
-end
-
--- creates a wall
-function new_wall()
-  return new_piece(004, true)
-end
-
--- creates a block
-function new_block()
-  return new_piece(003, false)
 end
 
 -- check if a tile actually exists on the board
