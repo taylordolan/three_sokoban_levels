@@ -4,11 +4,6 @@ __lua__
 -- sokoban sketch
 -- coyboy
 
--- todo
--- [ ] do some sort of mapping of types to sprites?
--- [ ] allow multiple adjacent heroes to move in the expected way
--- [ ] undo feature
-
 -- board size
 rows = 8
 cols = 8
@@ -29,9 +24,13 @@ function blueprint_from_sprite(level_sprite)
 end
 
 -- global stuff
-blueprint = blueprint_from_sprite(008)
 history = {}
 goals = {}
+levels = {006, 007, 008}
+level_index = 1
+level_complete = false
+delay = 0
+blueprint = blueprint_from_sprite(levels[level_index])
 
 -- edit mode stuff
 edit_mode = false
@@ -56,7 +55,6 @@ cursor = {
 }
 
 function _init()
-
   -- build the current level
   build_board(blueprint)
 end
@@ -64,7 +62,7 @@ end
 function _update60()
 
   if btnp(5) then
-    edit_mode = not edit_mode
+    -- edit_mode = not edit_mode
     history = {}
     build_board(blueprint)
   end
@@ -91,8 +89,15 @@ function _update60()
 
   -- play mode
   else
+    if delay > 0 then
+      delay -= 1
+    elseif level_complete then
+      level_index += 1
+      goals = {}
+      blueprint = blueprint_from_sprite(levels[level_index])
+      build_board(blueprint)
     -- undo
-    if btnp(4) and #history > 0 then
+    elseif btnp(4) and #history > 0 then
       undo()
     else
       for i = 1, 4 do
@@ -110,6 +115,10 @@ function _update60()
           end
         end
       end
+      level_complete = is_level_complete()
+      if level_complete then
+        delay = 60
+      end
     end
   end
 end
@@ -117,12 +126,14 @@ end
 function _draw()
   -- clear the screen
   cls()
+
   -- draw the floor
   for x = 1, cols do
 		for y = 1, rows do
 			spr(002, screen_x(x), screen_y(y))
 		end
 	end
+  -- edit mode stuff
   if edit_mode then
     for x = 1, cols do
       for y = 1, rows do
@@ -136,11 +147,15 @@ function _draw()
         spr(foo[color], screen_x(x), screen_y(y))
       end
     cursor:draw()
-    local message = "edit mode"
-    print(message, 64 - #message * 2, 13, 007)
+    local m = "edit mode"
+    print(m, 64 - #m * 2, 15, 007)
 	end
+  -- play mode stuff
   else
-    -- draw things
+    local m = level_complete and "nice!" or "level " .. level_index
+    print(m, 64 - #m * 2, 15, 007)
+    m = level_complete and "" or "z:undo x:restart"
+    print(m, 64 - #m * 2, 107, 005)
     for next in all(pieces) do
       next:draw()
     end
@@ -148,6 +163,16 @@ function _draw()
       next:draw()
     end
   end
+
+  -- draw grid
+  -- for x = -1, 128, 8 do
+  --   for y = -1, 128, 8 do
+  --     pset(x, y, 014)
+  --     pset(x+1, y, 014)
+  --     pset(x, y+1, 014)
+  --     pset(x+1, y+1, 014)
+  --   end
+  -- end
 end
 
 -- using `piece` as a thing that goes on the board
@@ -356,14 +381,14 @@ function screen_y(y)
 end
 
 __gfx__
-000000000000000077777770fffffff055555550eeeeeee0777277772f27777577eeee7700000000000000000000000000000000000000000000000000000000
-000000000002000077777770fffffff055555550eee0eee075fff557f2f777577777777700000000000000000000000000000000000000000000000000000000
-007007000222220077777770fffffff055555550e00000e075f7eff72f2777775575555700000000000000000000000000000000000000000000000000000000
-000770000002000077777770fffffff055555550eee0eee07ff557f7777757772ff77ff200000000000000000000000000000000000000000000000000000000
-000770000020200077777770fffffff055555550ee0e0ee07f755ff7777577775f5555f500000000000000000000000000000000000000000000000000000000
-007007000020200077777770fffffff055555550ee0e0ee07fff7f5777777e7e5ffffff500000000000000000000000000000000000000000000000000000000
-000000000000000077777770fffffff055555550eeeeeee0755fff57757777e727f55f7200000000000000000000000000000000000000000000000000000000
-0000000000000000000000000000000000000000000000007777777757777e7e5577777500000000000000000000000000000000000000000000000000000000
+000000000000000077777770fffffff055555550eeeeeee07772777777eeee772f27777500000000000000000000000000000000000000000000000000000000
+000000000002000077777770fffffff055555550eee0eee075fff55777777777f2f7775700000000000000000000000000000000000000000000000000000000
+007007000222220077777770fffffff055555550e00000e075f7eff7557555572f27777700000000000000000000000000000000000000000000000000000000
+000770000002000077777770fffffff055555550eee0eee07ff557f72ff77ff27777577700000000000000000000000000000000000000000000000000000000
+000770000020200077777770fffffff055555550ee0e0ee07f755ff75f5555f57775777700000000000000000000000000000000000000000000000000000000
+007007000020200077777770fffffff055555550ee0e0ee07fff7f575ffffff577777e7e00000000000000000000000000000000000000000000000000000000
+000000000000000077777770fffffff055555550eeeeeee0755fff5727f55f72757777e700000000000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000777777775577777557777e7e00000000000000000000000000000000000000000000000000000000
 __label__
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
