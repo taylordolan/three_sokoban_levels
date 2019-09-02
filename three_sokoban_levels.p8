@@ -91,11 +91,13 @@ function _update60()
   else
     if delay > 0 then
       delay -= 1
-    elseif level_complete then
+    elseif level_complete and level_index < #levels then
       level_index += 1
       goals = {}
       blueprint = blueprint_from_sprite(levels[level_index])
       build_board(blueprint)
+    elseif level_complete then
+      return
     -- undo
     elseif btnp(4) and #history > 0 then
       undo()
@@ -152,7 +154,7 @@ function _draw()
 	end
   -- play mode stuff
   else
-    local m = level_complete and "nice!" or "level " .. level_index
+    local m = level_complete and level_index == #levels and "you win!" or level_complete and "nice!" or "level " .. level_index
     print(m, 64 - #m * 2, 15, 007)
     m = level_complete and "" or "z:undo x:restart"
     print(m, 64 - #m * 2, 107, 005)
